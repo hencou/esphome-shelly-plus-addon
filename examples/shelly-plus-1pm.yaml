@@ -1,0 +1,66 @@
+# =============================================================================
+# Shelly Plus 1PM with Shelly Plus Add-On - Example
+# =============================================================================
+#
+# Configuration for Shelly Plus 1PM (ESP32, not Gen3!)
+# Note: GPIO pins are different from Gen3 devices.
+#
+# =============================================================================
+
+substitutions:
+  device_name: shelly-plus-1pm
+
+esphome:
+  name: ${device_name}
+
+esp32:
+  board: esp32doit-devkit-v1
+  framework:
+    type: arduino
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+logger:
+api:
+ota:
+
+# External component for Shelly Plus Add-On
+external_components:
+  - source:
+      type: git
+      url: https://github.com/majoto85/esphome-shelly-plus-addon
+      ref: main
+    components: [shelly_dallas]
+
+# 1-Wire bus configuration for Shelly Plus (NOT Gen3!)
+# Different pins than Gen3 devices!
+shelly_dallas:
+  pin_tx: GPIO0
+  pin_rx: GPIO1
+  update_interval: 30s
+
+sensor:
+  # DS18B20 Temperature Sensor
+  - platform: shelly_dallas
+    name: "Temperature"
+    resolution: 12
+
+  # Analog Input (Add-On) - GPIO3 for Plus devices
+  - platform: duty_cycle
+    pin: GPIO3
+    name: "Analog IN Duty"
+    id: addon_analog_duty
+    unit_of_measurement: "%"
+    update_interval: 1s
+
+binary_sensor:
+  # Digital Input (Add-On) - GPIO19 for Plus 1PM
+  - platform: gpio
+    pin:
+      number: GPIO19
+      mode: input
+    name: "Digital IN"
+    filters:
+      - delayed_on_off: 50ms

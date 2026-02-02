@@ -1,0 +1,257 @@
+# =============================================================================
+# Shelly 2PM Gen3 with Shelly Plus Add-On - Complete Example
+# =============================================================================
+#
+# This configuration demonstrates full usage of:
+# - Both relay outputs with power monitoring
+# - DS18B20 temperature sensor via 1-Wire
+# - Analog input (0-10V)
+# - Digital input
+# - Internal NTC temperature monitoring
+# - Power calibration system
+#
+# =============================================================================
+
+substitutions:
+  device_name: shelly-2pm-gen3
+  friendly_name: Shelly 2PM Gen3
+  channel_1_name: Output 1
+  channel_2_name: Output 2
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  variant: esp32c3
+  flash_size: 8MB
+  framework:
+    type: esp-idf
+    version: recommended
+    sdkconfig_options:
+      COMPILER_OPTIMIZATION_SIZE: y
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+    ssid: "${device_name} Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+# =============================================================================
+# Shelly Plus Add-On Component
+# =============================================================================
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/majoto85/esphome-shelly-plus-addon
+      ref: main
+    components: [shelly_dallas]
+
+# I2C for ADE7953 power monitoring
+i2c:
+  sda: GPIO6
+  scl: GPIO7
+
+# =============================================================================
+# Shelly Plus Add-On GPIO Configuration for 2PM Gen3
+# =============================================================================
+#
+# Add-On Inputs:
+#   - 1-Wire (DS18B20): GPIO9 (TX) + GPIO21 (RX)
+#   - Analog IN:        GPIO20 (as PWM/duty cycle, 0-10V = 0-100%)
+#   - Digital IN:       GPIO1 (shared with ADE7953 IRQ - works without IRQ)
+#
+# =============================================================================
+
+# 1-Wire bus for DS18B20 temperature sensors
+shelly_dallas:
+  pin_tx: GPIO9
+  pin_rx: GPIO21
+  update_interval: 30s
+
+# =============================================================================
+# Sensors
+# =============================================================================
+
+sensor:
+  # --- ADE7953 Power Monitoring ---
+  - platform: ade7953_i2c
+    voltage:
+      name: "Voltage"
+      id: voltage
+      device_class: voltage
+      state_class: measurement
+    frequency:
+      name: "Frequency"
+      accuracy_decimals: 2
+      device_class: frequency
+      state_class: measurement
+    current_a:
+      name: "${channel_1_name} Current"
+      device_class: current
+      state_class: measurement
+    current_b:
+      name: "${channel_2_name} Current"
+      device_class: current
+      state_class: measurement
+    active_power_a:
+      name: "${channel_1_name} Power"
+      id: channel_1_power
+      device_class: power
+      state_class: measurement
+      filters:
+        - multiply: -1
+    active_power_b:
+      name: "${channel_2_name} Power"
+      id: channel_2_power
+      device_class: power
+      state_class: measurement
+      filters:
+        - multiply: -1
+    update_interval: 5s
+
+  # --- DS18B20 Temperature Sensor (Add-On 1-Wire) ---
+  - platform: shelly_dallas
+    name: "External Temperature"
+    id: external_temp
+    resolution: 12
+    # For multiple sensors, specify address:
+    # address: 0x28FF1234567890AB
+
+  # --- Analog Input (Add-On, 0-10V as duty cycle) ---
+  - platform: duty_cycle
+    pin: GPIO20
+    name: "Analog IN Duty"
+    id: addon_analog_duty
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    update_interval: 1s
+
+  # Convert duty cycle to voltage (0-10V)
+  - platform: template
+    name: "Analog IN Voltage"
+    id: addon_analog_voltage
+    unit_of_measurement: "V"
+    accuracy_decimals: 2
+    device_class: voltage
+    state_class: measurement
+    lambda: |-
+      float duty = id(addon_analog_duty).state;
+      if (isnan(duty)) return NAN;
+      return duty * 0.1;  // 100% = 10V
+
+  # --- Internal NTC Temperature (Device Protection) ---
+  - platform: ntc
+    sensor: temp_resistance
+    name: "Device Temperature"
+    id: device_temp
+    device_class: temperature
+    state_class: measurement
+    calibration:
+      b_constant: 3350
+      reference_resistance: 10kOhm
+      reference_temperature: 298.15K
+    on_value_range:
+      - above: 70
+        then:
+          - switch.turn_off: relay_1
+          - switch.turn_off: relay_2
+          - logger.log: "EMERGENCY: Device temperature too high!"
+
+  - platform: resistance
+    id: temp_resistance
+    sensor: temp_analog
+    configuration: DOWNSTREAM
+    resistor: 32kOhm
+
+  - platform: adc
+    id: temp_analog
+    pin: GPIO4
+    update_interval: 60s
+
+# =============================================================================
+# Binary Sensors
+# =============================================================================
+
+binary_sensor:
+  # --- Add-On Digital Input (GPIO1) ---
+  - platform: gpio
+    pin:
+      number: GPIO1
+      mode: input
+    name: "Digital IN"
+    id: addon_digital_in
+    filters:
+      - delayed_on_off: 50ms
+
+  # --- Physical Switch Inputs ---
+  - platform: gpio
+    pin: GPIO18
+    name: "${channel_1_name} Input"
+    id: input_1
+    filters:
+      - delayed_on_off: 50ms
+    on_state:
+      then:
+        - switch.toggle: relay_1
+
+  - platform: gpio
+    pin: GPIO10
+    name: "${channel_2_name} Input"
+    id: input_2
+    filters:
+      - delayed_on_off: 50ms
+    on_state:
+      then:
+        - switch.toggle: relay_2
+
+  # --- Reset Button ---
+  - platform: gpio
+    pin:
+      number: GPIO19
+      inverted: true
+      mode:
+        input: true
+        pullup: true
+    name: "Reset Button"
+
+# =============================================================================
+# Switches (Relays)
+# =============================================================================
+
+switch:
+  - platform: gpio
+    id: relay_1
+    name: "${channel_1_name}"
+    pin: GPIO5
+    restore_mode: RESTORE_DEFAULT_OFF
+
+  - platform: gpio
+    id: relay_2
+    name: "${channel_2_name}"
+    pin: GPIO3
+    restore_mode: RESTORE_DEFAULT_OFF
+
+# =============================================================================
+# Status LED
+# =============================================================================
+
+status_led:
+  pin:
+    number: GPIO2
+    inverted: true
