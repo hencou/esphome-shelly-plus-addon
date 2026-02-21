@@ -130,6 +130,8 @@ sensor:
     name: "External Temperature"
     id: external_temp
     resolution: 12
+    # Error tolerance: consecutive errors before NaN (default: 5)
+    # max_errors: 5
     # For multiple sensors, specify address:
     # address: 0x28FF1234567890AB
 

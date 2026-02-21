@@ -1,31 +1,13 @@
-"""
-Shelly Plus Add-On 1-Wire Component for ESPHome
-
-This component provides support for DS18B20 temperature sensors connected
-to the Shelly Plus Add-On, which uses a dual-GPIO 1-Wire interface with
-galvanic isolation (separate TX and RX pins).
-
-Supported devices:
-- Shelly 2PM Gen3: TX=GPIO9, RX=GPIO21
-- Shelly 1PM Gen3: TX=GPIO9, RX=GPIO21
-- Shelly Plus 1/1PM: TX=GPIO0, RX=GPIO1
-- Shelly Plus 2PM: TX=GPIO0, RX=GPIO1
-
-GitHub: https://github.com/majoto85/esphome-shelly-plus-addon
-"""
-
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import pins
 from esphome.const import CONF_ID
 
-CODEOWNERS = ["@majoto85"]
+CODEOWNERS = ["@local"]
 MULTI_CONF = True
 
 shelly_dallas_ns = cg.esphome_ns.namespace("shelly_dallas")
-ShellyDallasComponent = shelly_dallas_ns.class_(
-    "ShellyDallasComponent", cg.PollingComponent
-)
+ShellyDallasComponent = shelly_dallas_ns.class_("ShellyDallasComponent", cg.PollingComponent)
 
 CONF_PIN_TX = "pin_tx"
 CONF_PIN_RX = "pin_rx"

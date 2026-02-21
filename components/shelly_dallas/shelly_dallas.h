@@ -1,23 +1,3 @@
-/**
- * Shelly Plus Add-On 1-Wire Component for ESPHome
- *
- * This component implements the 1-Wire protocol with separate TX and RX pins
- * for the Shelly Plus Add-On's galvanically isolated interface.
- *
- * The Shelly Plus Add-On uses an ISO7221A dual digital isolator which splits
- * the bidirectional 1-Wire protocol into separate output (TX) and input (RX)
- * paths.
- *
- * Supported sensors:
- * - DS18B20 (family code 0x28)
- * - DS18S20 (family code 0x10)
- * - DS1822  (family code 0x22)
- *
- * Based on timing from Tasmota's proven implementation.
- *
- * License: MIT
- */
-
 #pragma once
 
 #include "esphome/core/component.h"
@@ -29,7 +9,7 @@
 namespace esphome {
 namespace shelly_dallas {
 
-// DS18B20 1-Wire Commands
+// DS18B20 Commands
 static const uint8_t DALLAS_CMD_SEARCH_ROM = 0xF0;
 static const uint8_t DALLAS_CMD_READ_ROM = 0x33;
 static const uint8_t DALLAS_CMD_MATCH_ROM = 0x55;
@@ -40,20 +20,12 @@ static const uint8_t DALLAS_CMD_WRITE_SCRATCHPAD = 0x4E;
 
 class ShellyDallasTemperatureSensor;
 
-/**
- * Main component for the Shelly Plus Add-On 1-Wire bus.
- *
- * Manages the dual-pin 1-Wire communication and coordinates
- * temperature sensor readings.
- */
 class ShellyDallasComponent : public PollingComponent {
  public:
   void set_pin_tx(InternalGPIOPin *pin) { pin_tx_ = pin; }
   void set_pin_rx(InternalGPIOPin *pin) { pin_rx_ = pin; }
 
-  void register_sensor(ShellyDallasTemperatureSensor *sensor) {
-    sensors_.push_back(sensor);
-  }
+  void register_sensor(ShellyDallasTemperatureSensor *sensor) { sensors_.push_back(sensor); }
 
   void setup() override;
   void dump_config() override;
@@ -71,7 +43,7 @@ class ShellyDallasComponent : public PollingComponent {
   uint8_t read_byte_();
   void select_(uint64_t address);
 
-  // ROM Search algorithm
+  // Search ROM
   void search_();
 
   InternalGPIOPin *pin_tx_{nullptr};
@@ -80,15 +52,13 @@ class ShellyDallasComponent : public PollingComponent {
   std::vector<uint64_t> found_sensors_;
 };
 
-/**
- * Temperature sensor class for DS18B20/DS18S20/DS1822 sensors.
- */
 class ShellyDallasTemperatureSensor : public sensor::Sensor {
  public:
   void set_parent(ShellyDallasComponent *parent) { parent_ = parent; }
   void set_address(uint64_t address) { address_ = address; }
   void set_index(uint8_t index) { index_ = index; }
   void set_resolution(uint8_t resolution) { resolution_ = resolution; }
+  void set_max_errors(uint8_t max_errors) { max_consecutive_errors_ = max_errors; }
 
   uint64_t get_address() const { return address_; }
   optional<uint8_t> get_index() const { return index_; }
@@ -98,10 +68,17 @@ class ShellyDallasTemperatureSensor : public sensor::Sensor {
   bool read_temperature();
 
  protected:
+  void handle_read_error_(const char *reason);
+
   ShellyDallasComponent *parent_{nullptr};
   uint64_t address_{0};
   optional<uint8_t> index_{};
   uint8_t resolution_{12};
+
+  // Error tolerance: keep last valid value for a number of consecutive errors
+  float last_valid_value_{NAN};
+  uint8_t consecutive_errors_{0};
+  uint8_t max_consecutive_errors_{5};  // Default: 5 errors before NAN
 };
 
 }  // namespace shelly_dallas

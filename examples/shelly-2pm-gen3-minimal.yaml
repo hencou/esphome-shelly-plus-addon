@@ -47,3 +47,4 @@ sensor:
   - platform: shelly_dallas
     name: "Temperature"
     resolution: 12
+    # max_errors: 5  # Consecutive errors before NaN (default: 5)

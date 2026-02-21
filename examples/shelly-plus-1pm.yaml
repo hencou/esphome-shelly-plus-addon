@@ -46,6 +46,7 @@ sensor:
   - platform: shelly_dallas
     name: "Temperature"
     resolution: 12
+    # max_errors: 5  # Consecutive errors before NaN (default: 5)
 
   # Analog Input (Add-On) - GPIO3 for Plus devices
   - platform: duty_cycle

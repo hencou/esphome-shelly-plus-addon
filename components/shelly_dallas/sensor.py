@@ -1,10 +1,3 @@
-"""
-Shelly Dallas Temperature Sensor for ESPHome
-
-Provides DS18B20/DS18S20/DS1822 temperature sensor support for the
-Shelly Plus Add-On's dual-GPIO 1-Wire interface.
-"""
-
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import sensor
@@ -26,6 +19,7 @@ ShellyDallasTemperatureSensor = shelly_dallas_ns.class_(
 )
 
 CONF_SHELLY_DALLAS_ID = "shelly_dallas_id"
+CONF_MAX_ERRORS = "max_errors"
 
 CONFIG_SCHEMA = (
     sensor.sensor_schema(
@@ -41,6 +35,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_ADDRESS): cv.hex_uint64_t,
             cv.Optional(CONF_INDEX): cv.positive_int,
             cv.Optional(CONF_RESOLUTION, default=12): cv.int_range(min=9, max=12),
+            cv.Optional(CONF_MAX_ERRORS, default=5): cv.int_range(min=1, max=255),
         }
     )
 )
@@ -56,5 +51,6 @@ async def to_code(config):
         cg.add(var.set_index(config[CONF_INDEX]))
 
     cg.add(var.set_resolution(config[CONF_RESOLUTION]))
+    cg.add(var.set_max_errors(config[CONF_MAX_ERRORS]))
     cg.add(var.set_parent(hub))
     cg.add(hub.register_sensor(var))

@@ -1,15 +1,7 @@
-/**
- * Shelly Plus Add-On 1-Wire Component for ESPHome
- *
- * Implementation of the dual-pin 1-Wire protocol for the Shelly Plus Add-On.
- * Timing values based on Tasmota's proven implementation.
- *
- * License: MIT
- */
-
 #include "shelly_dallas.h"
 #include "esphome/core/log.h"
 #include "esphome/core/helpers.h"
+#include <cmath>
 
 namespace esphome {
 namespace shelly_dallas {
@@ -68,9 +60,10 @@ void ShellyDallasComponent::dump_config() {
 void ShellyDallasComponent::update() {
   // Start temperature conversion on all sensors
   if (!reset_()) {
-    ESP_LOGW(TAG, "No devices found on 1-Wire bus");
+    ESP_LOGW(TAG, "No devices found on 1-Wire bus during update");
+    // Still call read_temperature so sensors can use their error tolerance
     for (auto *sensor : sensors_) {
-      sensor->publish_state(NAN);
+      sensor->read_temperature();
     }
     return;
   }
@@ -89,7 +82,7 @@ void ShellyDallasComponent::update() {
 
 bool HOT IRAM_ATTR ShellyDallasComponent::reset_() {
   // Wait for bus to be HIGH (idle state)
-  // This is critical for reliable operation
+  // This is critical - from persuader72's implementation
   uint8_t retries = 125;
   do {
     if (--retries == 0) {
@@ -146,7 +139,7 @@ bool HOT IRAM_ATTR ShellyDallasComponent::read_bit_() {
   // Release line
   pin_tx_->digital_write(true);
 
-  // Wait until 12µs (ESP32 timing constant)
+  // Wait until 12µs (ESP32 timing constant from persuader72)
   // This ensures we sample at the optimal time
   while (micros() - start < 12)
     ;
@@ -240,7 +233,7 @@ void ShellyDallasComponent::search_() {
       write_bit_(take_bit);
     }
 
-    // Verify CRC (last byte should make CRC = 0)
+    // Verify CRC
     uint8_t crc = 0;
     for (uint8_t i = 0; i < 8; i++) {
       uint8_t byte = (address >> (i * 8)) & 0xFF;
@@ -254,13 +247,11 @@ void ShellyDallasComponent::search_() {
     }
 
     if (crc == 0) {
-      // Check if it's a supported sensor family
+      // Check if it's a DS18B20 (family code 0x28) or DS18S20 (0x10) or DS1822 (0x22)
       uint8_t family = address & 0xFF;
       if (family == 0x28 || family == 0x10 || family == 0x22) {
         found_sensors_.push_back(address);
-        const char *type = (family == 0x28) ? "DS18B20" :
-                          (family == 0x10) ? "DS18S20" : "DS1822";
-        ESP_LOGI(TAG, "Found %s: 0x%016llX", type, address);
+        ESP_LOGI(TAG, "Found DS18x20: 0x%016llX (family 0x%02X)", address, family);
       } else {
         ESP_LOGW(TAG, "Unknown device family 0x%02X at 0x%016llX", family, address);
       }
@@ -279,14 +270,12 @@ void ShellyDallasComponent::search_() {
 
 bool ShellyDallasTemperatureSensor::setup_sensor() {
   if (address_ == 0 && index_.has_value()) {
-    // Resolve index to address
     uint8_t idx = index_.value();
     if (idx < parent_->found_sensors_.size()) {
       address_ = parent_->found_sensors_[idx];
       ESP_LOGI(TAG, "Resolved index %d to address 0x%016llX", idx, address_);
     } else {
-      ESP_LOGW(TAG, "Index %d out of range (found %d sensors)",
-               idx, parent_->found_sensors_.size());
+      ESP_LOGW(TAG, "Index %d out of range (found %d sensors)", idx, parent_->found_sensors_.size());
       return false;
     }
   } else if (address_ == 0 && parent_->found_sensors_.size() == 1) {
@@ -304,22 +293,35 @@ bool ShellyDallasTemperatureSensor::setup_sensor() {
   if (!parent_->reset_()) return false;
   parent_->select_(address_);
   parent_->write_byte_(DALLAS_CMD_WRITE_SCRATCHPAD);
-  parent_->write_byte_(0x00);  // TH (alarm high)
-  parent_->write_byte_(0x00);  // TL (alarm low)
+  parent_->write_byte_(0x00);  // TH
+  parent_->write_byte_(0x00);  // TL
   parent_->write_byte_(((resolution_ - 9) << 5) | 0x1F);  // Config register
 
   return true;
 }
 
+void ShellyDallasTemperatureSensor::handle_read_error_(const char *reason) {
+  consecutive_errors_++;
+
+  if (consecutive_errors_ >= max_consecutive_errors_ || std::isnan(last_valid_value_)) {
+    // Too many errors or no valid value yet - publish NAN
+    ESP_LOGW(TAG, "%s (error %d/%d, publishing NAN)", reason, consecutive_errors_, max_consecutive_errors_);
+    publish_state(NAN);
+  } else {
+    // Keep using last valid value
+    ESP_LOGW(TAG, "%s (error %d/%d, keeping %.2f°C)", reason, consecutive_errors_, max_consecutive_errors_, last_valid_value_);
+    publish_state(last_valid_value_);
+  }
+}
+
 bool ShellyDallasTemperatureSensor::read_temperature() {
   if (address_ == 0) {
-    publish_state(NAN);
+    handle_read_error_("No address configured");
     return false;
   }
 
   if (!parent_->reset_()) {
-    ESP_LOGW(TAG, "Bus reset failed");
-    publish_state(NAN);
+    handle_read_error_("Bus reset failed");
     return false;
   }
 
@@ -345,23 +347,21 @@ bool ShellyDallasTemperatureSensor::read_temperature() {
   }
 
   if (crc != 0) {
-    ESP_LOGW(TAG, "CRC error reading scratchpad");
-    publish_state(NAN);
+    handle_read_error_("CRC error reading scratchpad");
     return false;
   }
 
   // Calculate temperature
   int16_t raw = (scratchpad[1] << 8) | scratchpad[0];
 
-  // Handle different sensor types
+  // Check for DS18S20 (family 0x10)
   if ((address_ & 0xFF) == 0x10) {
-    // DS18S20 - 9-bit resolution, different format
     raw = raw << 3;
     if (scratchpad[7] == 0x10) {
       raw = (raw & 0xFFF0) + 12 - scratchpad[6];
     }
   } else {
-    // DS18B20 / DS1822 - variable resolution
+    // DS18B20
     uint8_t cfg = scratchpad[4] & 0x60;
     if (cfg == 0x00) raw &= ~7;       // 9-bit
     else if (cfg == 0x20) raw &= ~3;  // 10-bit
@@ -370,6 +370,16 @@ bool ShellyDallasTemperatureSensor::read_temperature() {
   }
 
   float temperature = raw / 16.0f;
+
+  // Sanity check: reject obviously wrong values
+  if (temperature < -55.0f || temperature > 125.0f) {
+    handle_read_error_("Temperature out of range");
+    return false;
+  }
+
+  // Success: reset error counter and store valid value
+  consecutive_errors_ = 0;
+  last_valid_value_ = temperature;
 
   ESP_LOGD(TAG, "Temperature: %.2f °C (raw: %d)", temperature, raw);
   publish_state(temperature);

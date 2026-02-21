@@ -139,6 +139,10 @@ sensor:
     # Resolution: 9-12 bits (higher = more accurate but slower)
     resolution: 12
 
+    # Error tolerance: keep last valid value for N consecutive errors
+    # before publishing NaN (default: 5)
+    max_errors: 5
+
     # For multiple sensors, specify the address
     address: 0x28FF1234567890AB
 
@@ -152,6 +156,23 @@ sensor:
       - sliding_window_moving_average:
           window_size: 5
           send_every: 1
+```
+
+### Error Tolerance
+
+Due to the timing-critical nature of the 1-Wire protocol through galvanic isolation, occasional read errors may occur. The component includes built-in error tolerance:
+
+- **Last valid value**: On read errors (CRC, bus reset failure), the sensor keeps publishing the last valid temperature
+- **Consecutive error count**: Only after `max_errors` consecutive failures, the sensor publishes NaN
+- **Automatic recovery**: When a successful read occurs, the error counter resets
+
+This prevents brief glitches from causing automations to trigger unexpectedly.
+
+**Log output example:**
+```
+[W] CRC error reading scratchpad (error 1/5, keeping 23.50°C)
+[W] Bus reset failed (error 2/5, keeping 23.50°C)
+[D] Temperature: 23.56 °C (raw: 377)  # Success, counter reset
 ```
 
 ## GPIO Reference
@@ -219,11 +240,21 @@ sensor:
 
 - Usually indicates timing issues or poor connections
 - Try shorter wires or add a 4.7kΩ pull-up resistor on the data line
+- Occasional CRC errors are normal - the component tolerates up to `max_errors` consecutive failures before publishing NaN
+- Increase `max_errors` if you see frequent but recoverable errors
 
 ### Sensor shows NaN
 
-- Conversion timeout - increase `update_interval`
+- Only occurs after `max_errors` consecutive read failures (default: 5)
+- Check wiring and connections
+- Try increasing `max_errors` for noisy environments
+- Increase `update_interval` if conversion timeouts occur
 - Check that only one component uses the 1-Wire GPIOs
+
+### Relay/automation triggers unexpectedly
+
+- If automations react to brief NaN values, increase `max_errors` to provide more tolerance
+- Example: `max_errors: 10` keeps the last valid value for up to 10 consecutive failures
 
 ## Technical Details
 
