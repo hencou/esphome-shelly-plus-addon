@@ -15,8 +15,9 @@ This component was developed because ESPHome has no native support for the Shell
 | Shelly 1PM Gen3 | ESP32-C3 | GPIO9 | GPIO21 | GPIO20 | GPIO1 |
 | Shelly Plus 1/1PM | ESP32 | GPIO0 | GPIO1 | GPIO3 | GPIO19/22 |
 | Shelly Plus 2PM | ESP32 | GPIO0 | GPIO1 | GPIO3 | GPIO22 |
+| Shelly 1 Gen4 | ESP32 | GPIO9 | GPIO16 | GPIO17 | GPIO18 |
 
-> **Note:** GPIO assignments vary between device generations. Gen3 devices use different pins than Plus devices!
+> **Note:** GPIO assignments vary between device generations. Gen3/4 devices use different pins than Plus devices!
 
 ## Why This Component?
 
